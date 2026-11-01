@@ -1,7 +1,7 @@
 # Название всего автоматического процесса
 name: Unity 2D Platformer CI/CD
 
-# Условие запуска: реагировать на любой push в главную ветку master
+# Условие запуска: реагировать на любой push в главную ветку main
 on:
   push:
     branches: [ "main" ]
@@ -56,3 +56,46 @@ jobs:
           echo "=== Начало процесса зеркалирования ==="
           git push --force https://x-access-token:${BACKUP_TOKEN}@github.com/TFIDHB/Lab2.git main
           echo "=== Код успешно продублирован ==="
+
+  # НОВЫЙ ЭТАП 3: Автоматическая сборка Docker-образа в облако
+  build_docker_image:
+    needs: sanity_check
+    if: github.repository == 'TFIDHB/Lab1' # Публикуем образ только из оригинального репо (не из зеркала Lab2)
+    runs-on: ubuntu-latest
+    # КРИТИЧЕСКИ ВАЖНЫЕ СТРОКИ: разрешаем этой конкретной задаче публиковать пакеты
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Compressed Placeholders for Docker
+        # Генерируем фейковые .gz файлы, чтобы шаг COPY в Dockerfile не упал без реального билда Unity
+        run: |
+          mkdir -p Builds/WebGL/Build
+          if [ -z "$(ls -A Builds/WebGL/Build)" ]; then
+            echo "<h3>Unity 6 Compressed Game Cloud Layer</h3>" > Builds/WebGL/index.html
+            touch Builds/WebGL/Build/game.framework.js.gz
+            touch Builds/WebGL/Build/game.wasm.gz
+            touch Builds/WebGL/Build/game.data.gz
+            echo "Создана временная структура сжатых файлов для сборщика Docker."
+          fi
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # Системный автоматический токен GitHub
+
+      - name: Build and Push Compressed Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          # Имя образа в GHCR должно быть в нижнем регистре, поэтому tfidhb
+          tags: |
+            ghcr.io/tfidhb/platformer-game:latest
+            ghcr.io/tfidhb/platformer-game:${{ github.sha }}
