@@ -14,6 +14,8 @@ public class PlayerTests
     [Test]
     public void EditMode_PlayerTag_IsCorrect()
     {
+        Assert.AreEqual(1, 2); // ВРЕМЕННО: проверка защиты пайплайна (потом откатить)
+
         // Открываем сцену игры, чтобы получить доступ к её объектам
         var scene = EditorSceneManager.OpenScene(MainScenePath, OpenSceneMode.Single);
         Assert.IsTrue(scene.IsValid(), "Ошибка: не удалось открыть сцену SampleScene!");
