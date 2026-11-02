@@ -5,3 +5,4 @@
 | 1 | Сборка Unity WebGL-проекта через терминал (BuildManager.cs) | [LR1.md](LR1.md) |
 | 2 | Автоматическое зеркалирование репозитория через GitHub Actions | [LR2.md](LR2.md) |
 | 3 | Контейнеризация веб-сервера в Docker и раздача сжатых файлов со стороны Nginx | [LR3.md](LR3.md) |
+| 4 | Автоматизация тестирования (Unity Test Runner) в CI/CD | [LR4.md](LR4.md) |
