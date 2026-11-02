@@ -9,10 +9,10 @@ on:
 jobs:
   # ЗАДАЧА 1: Быстрая диагностика структуры проекта (Sanity Check)
   sanity_check:
-    runs-on: ubuntu-latest # Запуск на бесплатном облачном сервере Linux
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4 # Скачиваем код проекта на облачный сервер
+        uses: actions/checkout@v4
 
       - name: Check Unity Directories
         run: |
@@ -26,17 +26,63 @@ jobs:
           find Assets/ -name "*Controller.cs" -print
           find Assets/ -name "BuildManager.cs" -print
 
+  # ЭТАП 2 (ЛР №4): Автоматический запуск тестов Unity
+  run_tests:
+    needs: sanity_check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      # Кэш папки Library, чтобы повторные запуски были быстрее
+      - uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
+
+      # Официальный CLI GameCI с фиксированной версией
+      - name: Install GameCI CLI
+        run: |
+          curl -sL -o game-ci.tar.gz https://github.com/game-ci/cli/releases/download/v0.1.72/game-ci-linux-x64.tar.gz
+          tar xzf game-ci.tar.gz ./game-ci
+          echo "$PWD" >> $GITHUB_PATH
+
+      # Запуск тестов EditMode и PlayMode в контейнере unityci/editor.
+      # Coverage отключен: на Unity 6 он роняет редактор в контейнере (SIGSEGV, exit code 139).
+      - name: Run Unity Tests
+        run: |
+          game-ci test --docker --dockerShmSize=1025m \
+            --engine=unity --testPlatforms='playmode;editmode;COMBINE_RESULTS' \
+            --engineVersion=6000.3.11f1 --coverageEnabled=false \
+            --artifactsPath=artifacts --dockerIsolationMode=default \
+            --containerRegistryRepository=unityci/editor \
+            --containerRegistryImageVersion=3
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
+      # Сохраняем результаты тестов даже при падении
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: artifacts/
+
   # ЗАДАЧА 2: Автоматическое зеркалирование в резервный репозиторий
   mirror_repo:
-    needs: sanity_check # Начнется только после того, как успешно пройдет первая задача
-    if: github.repository == 'TFIDHB/Lab1' # Только в оригинальном репо, чтобы избежать цикла в backup
+    needs: run_tests # Только после успешных тестов
+    if: github.repository == 'TFIDHB/Lab1'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full history
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Скачиваем полную историю коммитов для корректного зеркалирования
-          persist-credentials: false # Отключаем credential helper — чтобы GITHUB_TOKEN не перекрывал PAT
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Verify token is set
         env:
@@ -57,12 +103,11 @@ jobs:
           git push --force https://x-access-token:${BACKUP_TOKEN}@github.com/TFIDHB/Lab2.git main
           echo "=== Код успешно продублирован ==="
 
-  # НОВЫЙ ЭТАП 3: Автоматическая сборка Docker-образа в облако
+  # ЭТАП 3: Автоматическая сборка Docker-образа в облако
   build_docker_image:
-    needs: sanity_check
-    if: github.repository == 'TFIDHB/Lab1' # Публикуем образ только из оригинального репо (не из зеркала Lab2)
+    needs: run_tests # Docker собирается ТОЛЬКО если тесты прошли
+    if: github.repository == 'TFIDHB/Lab1'
     runs-on: ubuntu-latest
-    # КРИТИЧЕСКИ ВАЖНЫЕ СТРОКИ: разрешаем этой конкретной задаче публиковать пакеты
     permissions:
       contents: read
       packages: write
@@ -71,7 +116,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Create Compressed Placeholders for Docker
-        # Генерируем фейковые .gz файлы, чтобы шаг COPY в Dockerfile не упал без реального билда Unity
         run: |
           mkdir -p Builds/WebGL/Build
           if [ -z "$(ls -A Builds/WebGL/Build)" ]; then
@@ -87,7 +131,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }} # Системный автоматический токен GitHub
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push Compressed Docker Image
         uses: docker/build-push-action@v5
@@ -95,7 +139,6 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          # Имя образа в GHCR должно быть в нижнем регистре, поэтому tfidhb
           tags: |
             ghcr.io/tfidhb/platformer-game:latest
             ghcr.io/tfidhb/platformer-game:${{ github.sha }}
